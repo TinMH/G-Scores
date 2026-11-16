@@ -1,0 +1,20 @@
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { DataSource } from 'typeorm';
+
+@SkipThrottle()
+@Controller('health')
+export class HealthController {
+  constructor(private readonly dataSource: DataSource) {}
+
+  /** Used by K8s readiness/liveness probes. */
+  @Get()
+  async check() {
+    try {
+      await this.dataSource.query('SELECT 1');
+      return { status: 'ok' };
+    } catch {
+      throw new ServiceUnavailableException({ status: 'db_unavailable' });
+    }
+  }
+}
