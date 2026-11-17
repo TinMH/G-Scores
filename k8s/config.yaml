@@ -7,13 +7,7 @@ data:
   DB_PORT: "5432"
   DB_NAME: gscores
   DB_USER: gscores
----
-# Demo only. For real use, create it out-of-band instead of committing:
-#   kubectl -n gscores create secret generic gscores-db --from-literal=DB_PASSWORD=...
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gscores-db
-type: Opaque
-stringData:
-  DB_PASSWORD: change-me
+# The database password is NOT in this repository. Create the secret before applying (see k8s/README.md):
+#   kubectl -n gscores create secret generic gscores-db \
+#     --from-literal=DB_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/')"
+# It is read by the postgres StatefulSet (POSTGRES_PASSWORD), the API and the migrate-and-seed Job.
