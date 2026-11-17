@@ -84,7 +84,7 @@ export function TopScorersByGroup({ overview, loading, error, onRetry }: Props) 
 
   return (
     <Panel title={title} subtitle={subtitle}>
-      <ul className="flex flex-1 flex-col justify-between gap-2.5">
+      <ul className="grid gap-2.5 md:grid-cols-2 xl:flex xl:flex-1 xl:flex-col xl:justify-between">
         {overview.groupTopScorers.map((s) => (
           <li key={s.group.code}>
             <Link

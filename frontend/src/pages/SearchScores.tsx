@@ -117,8 +117,8 @@ export function SearchScores() {
     <>
       {/* Balanced Search Card */}
       <section className="mb-6 surface p-5 md:p-6">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-center">
-          <div className="lg:col-span-7">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12 xl:items-center">
+          <div className="xl:col-span-7">
             <h2 className="text-base font-bold text-slate-900 md:text-lg">{t("Tra cứu theo số báo danh")}</h2>
             <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
               {t("Nhập mã số báo danh 8 chữ số để trích xuất điểm thi từng môn và tổng điểm các khối xét tuyển.")}
@@ -190,7 +190,7 @@ export function SearchScores() {
           </div>
 
           {/* Right Quick Sample Grid */}
-          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3.5 lg:col-span-5">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3.5 xl:col-span-5">
             <p className="mb-2.5 text-xs font-semibold tracking-wider text-slate-500 uppercase">
               {t("Số báo danh gợi ý")}
             </p>
@@ -226,7 +226,7 @@ export function SearchScores() {
       {loading && (
         <div className="space-y-4" aria-live="polite" aria-busy="true">
           <div className="h-28 animate-pulse rounded-2xl bg-surface" />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 9 }).map((_, idx) => (
               <div key={idx} className="h-28 animate-pulse rounded-2xl bg-surface" />
             ))}
@@ -287,7 +287,7 @@ export function SearchScores() {
         <div className="space-y-6">
           {/* Official Student Banner */}
           <div className="overflow-hidden rounded-2xl bg-gradient-to-r keep-light from-brand-dark via-indigo-900 to-brand p-5 text-white shadow-md md:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide text-amber-300 uppercase ring-1 ring-white/15">
                   {t("Phiếu điểm tốt nghiệp THPT 2024")}
@@ -335,7 +335,7 @@ export function SearchScores() {
             subtitle={t("Mỗi môn được xếp vào một trong 4 mức điểm.")}
             action={<ScoreLegend />}
           >
-            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
               {result.scores.map(({ subject, score, level }) => {
                 const taken = score !== null && level !== null;
                 const pct = taken ? Math.min(100, Math.max(0, score * 10)) : 0;
@@ -400,7 +400,7 @@ export function SearchScores() {
                 {t("Thí sinh chưa có đủ điểm cả 3 môn cho các khối chuẩn (A00, A01, B00, C00, D01).")}
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
                 {result.groups.map((group) => {
                   const isBest = bestGroup !== null && group.total === bestGroup.total;
                   const pct = Math.min(100, Math.max(0, (group.total / 30) * 100));

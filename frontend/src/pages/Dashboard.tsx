@@ -18,12 +18,15 @@ export function Dashboard() {
       <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <ScoreMix levels={levels.data} loading={levels.loading} error={levels.error} onRetry={levels.reload} />
         <Highlights overview={overview.data} loading={overview.loading} error={overview.error} onRetry={overview.reload} />
-        <TopScorersByGroup
-          overview={overview.data}
-          loading={overview.loading}
-          error={overview.error}
-          onRetry={overview.reload}
-        />
+        {/* On tablets the third panel spans both columns instead of sitting alone next to an empty cell. */}
+        <div className="md:col-span-2 xl:col-span-1 [&>section]:h-full">
+          <TopScorersByGroup
+            overview={overview.data}
+            loading={overview.loading}
+            error={overview.error}
+            onRetry={overview.reload}
+          />
+        </div>
       </div>
 
       <KpiStrip

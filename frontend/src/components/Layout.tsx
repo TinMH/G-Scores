@@ -110,7 +110,7 @@ export function Layout() {
 
       {open && (
         <div
-          className="fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-[2px] md:hidden"
+          className="fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-[2px] lg:hidden"
           onClick={() => setOpen(false)}
           aria-hidden="true"
         />
@@ -118,8 +118,8 @@ export function Layout() {
 
       {/* Sidebar */}
       <aside
-        className={`z-40 flex w-64 shrink-0 flex-col justify-between border-r border-slate-200 bg-surface p-4 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl max-md:transition-transform max-md:duration-200 md:sticky md:top-0 md:h-dvh ${
-          open ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'
+        className={`z-40 flex w-64 shrink-0 flex-col justify-between border-r border-slate-200 bg-surface p-4 max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:shadow-2xl max-lg:transition-transform max-lg:duration-200 lg:sticky lg:top-0 lg:h-dvh ${
+          open ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full'
         }`}
       >
         <div>
@@ -129,7 +129,7 @@ export function Layout() {
               type="button"
               onClick={() => setOpen(false)}
               aria-label={t("Đóng menu")}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 md:hidden"
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -171,7 +171,7 @@ export function Layout() {
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-surface/85 px-4 backdrop-blur-md sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3 md:hidden">
+          <div className="flex items-center gap-3 lg:hidden">
             <button
               type="button"
               className="rounded-lg border border-slate-200 bg-surface p-2 text-slate-700 hover:bg-slate-50"
@@ -229,7 +229,7 @@ export function Card({
 }) {
   return (
     <section className="surface mb-6 p-5 md:p-6">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           {subtitle && <p className="mt-1 text-sm text-slate-600">{subtitle}</p>}

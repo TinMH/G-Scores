@@ -29,7 +29,7 @@ export function KpiStrip({
 }) {
   if (loading) {
     return (
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-busy="true">
+      <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-busy="true">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="surface h-28 animate-pulse" />
         ))}
@@ -62,7 +62,7 @@ export function KpiStrip({
   const all = sum((c) => c.excellent + c.good + c.average + c.poor);
 
   return (
-    <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-3.5 lg:grid-cols-4">
+    <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-3.5 xl:grid-cols-4">
       <Kpi
         label={t('Tổng số thí sinh')}
         value={formatCount(totals.candidates)}
