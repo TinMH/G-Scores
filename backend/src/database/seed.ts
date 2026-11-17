@@ -22,6 +22,12 @@ async function main() {
   const [{ count }] = await AppDataSource.query(`SELECT COUNT(*)::int AS count FROM students`);
   if (count > 0 && !force) {
     console.log(`students already has ${count} rows — skipping (use --force to reload)`);
+    // Databases seeded before overview_stats existed: build the missing stats without reloading 1M rows.
+    const [{ n }] = await AppDataSource.query(`SELECT COUNT(*)::int AS n FROM overview_stats`);
+    if (n === 0) {
+      await refreshStats(AppDataSource.manager);
+      console.log("overview_stats was empty — rebuilt");
+    }
     return AppDataSource.destroy();
   }
 
