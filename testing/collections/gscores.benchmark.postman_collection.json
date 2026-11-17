@@ -1,0 +1,57 @@
+{
+  "info": {
+    "name": "G-Scores API benchmark",
+    "description": "Latency benchmark for the headline endpoints. Run it with `npm run bench` (scripts/benchmark.mjs), which feeds one candidate number per iteration and aggregates the response times. Every request gets a distinct X-Forwarded-For so the per-IP rate limit (60/min) does not throttle the load.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// A different client address for every request: this measures the API, not the rate limiter.",
+          "const n = Number(pm.collectionVariables.get('reqSeq') || 0);",
+          "pm.collectionVariables.set('reqSeq', String(n + 1));",
+          "const ip = '10.' + ((n >> 16) & 255) + '.' + ((n >> 8) & 255) + '.' + (n & 255);",
+          "pm.request.headers.upsert({ key: 'X-Forwarded-For', value: ip });"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('status is 200', () => pm.response.to.have.status(200));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "health",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "lookup",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/students/{{sbd}}" }
+    },
+    {
+      "name": "levels",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/reports/score-levels" }
+    },
+    {
+      "name": "ranking",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/rankings/A00?limit=10" }
+    },
+    {
+      "name": "overview",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/overview" }
+    },
+    {
+      "name": "subjects",
+      "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/subjects" }
+    }
+  ]
+}

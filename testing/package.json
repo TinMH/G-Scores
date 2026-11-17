@@ -1,0 +1,17 @@
+{
+  "name": "gscores-api-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Black-box API tests (Postman collection run by newman) against a running G-Scores stack with the real 2024 dataset",
+  "scripts": {
+    "test": "newman run collections/gscores.postman_collection.json -e environments/local.postman_environment.json",
+    "test:compose": "newman run collections/gscores.postman_collection.json -e environments/compose.postman_environment.json",
+    "test:ci": "newman run collections/gscores.postman_collection.json -e environments/local.postman_environment.json --reporters cli,junit --reporter-junit-export reports/junit.xml",
+    "test:html": "newman run collections/gscores.postman_collection.json -e environments/local.postman_environment.json --reporters cli,htmlextra --reporter-htmlextra-export reports/report.html",
+    "bench": "node scripts/benchmark.mjs"
+  },
+  "devDependencies": {
+    "newman": "^6.2.1",
+    "newman-reporter-htmlextra": "^1.23.1"
+  }
+}
