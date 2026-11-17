@@ -8,15 +8,16 @@ resources:
   - seed-job.yaml
   - api.yaml
   - web.yaml
-  - ingress.yaml
-# Replace OWNER with your GitHub username (images pushed to GHCR by CI).
+  - istio.yaml
+# Images are public on GHCR (no pull secret needed). Pinned to a commit tag so a deploy is reproducible;
+# bump newTag to the short SHA of the commit you want (CI pushes ghcr.io/tinmh/gscores-*:<sha> and :latest).
 images:
   - name: gscores-api
-    newName: ghcr.io/OWNER/gscores-api
-    newTag: latest
+    newName: ghcr.io/tinmh/gscores-api
+    newTag: "00d853f"
   - name: gscores-seeder
-    newName: ghcr.io/OWNER/gscores-seeder
-    newTag: latest
+    newName: ghcr.io/tinmh/gscores-seeder
+    newTag: "00d853f"
   - name: gscores-web
-    newName: ghcr.io/OWNER/gscores-web
-    newTag: latest
+    newName: ghcr.io/tinmh/gscores-web
+    newTag: "00d853f"

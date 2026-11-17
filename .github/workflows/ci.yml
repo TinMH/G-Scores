@@ -130,10 +130,15 @@ jobs:
         run: |
           curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | tar -xz -C /usr/local/bin kubeconform
-      - name: Render kustomization and validate against the Kubernetes schema
+      - name: Render kustomization and validate against Kubernetes + Istio / cert-manager CRD schemas
         run: |
-          kubectl kustomize k8s > rendered.yaml
-          kubeconform -strict -summary -kubernetes-version 1.30.0 -ignore-missing-schemas rendered.yaml
+          # The Certificate lives in istio-system, outside the main kustomization, so validate it alongside.
+          { kubectl kustomize k8s; echo '---'; cat k8s/tls/certificate.yaml; } > rendered.yaml
+          # Strict: a typo in a Gateway or Certificate field fails the build instead of being skipped.
+          kubeconform -strict -summary -kubernetes-version 1.30.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered.yaml
 
   validate-docker:
     name: "T1 · Validate Dockerfiles and compose"

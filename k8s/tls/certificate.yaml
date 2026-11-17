@@ -1,0 +1,20 @@
+# Let's Encrypt certificate for the Istio gateway. It must live in istio-system (where the gateway reads
+# credentialName secrets from), so it is NOT part of the main kustomization, which forces namespace "gscores".
+# Apply it first, it takes a minute or two (DNS-01 challenge through Cloudflare):
+#   kubectl apply -f k8s/tls/certificate.yaml
+#   kubectl -n istio-system get certificate gscores-appforsell -w      # wait for READY=True
+#
+# Uses the Issuer "letsencrypt" that already exists in istio-system (DNS-01 via the cloudflare-dns token),
+# exactly like the certificates of the other apps on this cluster.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gscores-appforsell
+  namespace: istio-system
+spec:
+  secretName: gscores-appforsell-tls
+  dnsNames:
+    - gscores.appforsell.com
+  issuerRef:
+    kind: Issuer
+    name: letsencrypt

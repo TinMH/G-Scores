@@ -1,0 +1,38 @@
+# Public entry through the cluster's Istio ingress gateway (the same pattern the other apps on this cluster use).
+#
+#   Cloudflare (proxied A record, SSL mode "Full (strict)") -> Istio ingress gateway (LoadBalancer :80/:443)
+#     -> this Gateway (TLS terminated with the Let's Encrypt secret from tls/certificate.yaml)
+#     -> VirtualService -> Service "web" (nginx: SPA + /api proxy) -> Service "api"
+#
+# Port 80 redirects to HTTPS, so Cloudflare must use Full (strict); "Flexible" would loop forever.
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: gscores-gateway
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port: { number: 80, name: http, protocol: HTTP }
+      hosts: ["gscores.appforsell.com"]
+      tls:
+        httpsRedirect: true
+    - port: { number: 443, name: https, protocol: HTTPS }
+      hosts: ["gscores.appforsell.com"]
+      tls:
+        mode: SIMPLE
+        # Created by cert-manager in istio-system (see tls/certificate.yaml).
+        credentialName: gscores-appforsell-tls
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: gscores
+spec:
+  hosts: ["gscores.appforsell.com"]
+  gateways: ["gscores-gateway"]
+  http:
+    - route:
+        - destination:
+            host: web
+            port: { number: 80 }
