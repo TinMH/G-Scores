@@ -1,0 +1,65 @@
+# Identity used by the Release workflow to deploy. It can only touch what the app's manifests contain, inside the
+# "gscores" namespace: no secrets, no other namespaces, no cluster-scoped resources.
+# Applied once by a cluster admin (it is NOT part of the main kustomization):
+#   kubectl apply -f k8s/rbac/deployer.yaml
+#
+# Revoke access at any time with:  kubectl -n gscores delete secret github-deployer-token
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer
+  namespace: gscores
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer
+  namespace: gscores
+rules:
+  # Everything `kubectl apply -k k8s` manages
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.istio.io"]
+    resources: ["gateways", "virtualservices"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Rollout status / undo and diagnosing a failed release (read-only)
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer
+  namespace: gscores
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer
+    namespace: gscores
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer
+---
+# Long-lived token for the ServiceAccount (Kubernetes fills in the value; nothing secret is stored in git).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-token
+  namespace: gscores
+  annotations:
+    kubernetes.io/service-account.name: github-deployer
+type: kubernetes.io/service-account-token
