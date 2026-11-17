@@ -1,0 +1,72 @@
+@import 'tailwindcss';
+@import './theme-dark.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Rubik', system-ui, -apple-system, sans-serif;
+
+  /* Brand: indigo. brand = fills (buttons, active nav). brand-fg = brand-coloured text, lightened in dark mode. */
+  --color-brand: #4338ca;
+  --color-brand-fg: #4338ca;
+  --color-brand-dark: #1e1b4b;
+  --color-accent: #f59e0b;
+
+  /* Card / panel background. Light: white. Dark: see .dark below. */
+  --color-surface: #ffffff;
+
+  /* Score levels (also used by charts) */
+  --color-level-excellent: #10b981;
+  --color-level-good: #3b82f6;
+  --color-level-average: #f59e0b;
+  --color-level-poor: #f43f5e;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.04);
+  --shadow-lift: 0 8px 24px -8px rgb(67 56 202 / 0.25);
+}
+
+.dark {
+  color-scheme: dark;
+  --color-surface: #0f172a; /* slate-900 */
+  --color-brand-fg: #a5b4fc; /* indigo-300 */
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.02);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased selection:bg-indigo-600 selection:text-white;
+  }
+  /* Visible keyboard focus everywhere (WCAG 2.4.7) */
+  :where(a, button, input, select, [role='tab'], [role='radio'], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand-fg);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+  }
+  button:not(:disabled),
+  [role='tab'],
+  [role='radio'],
+  select {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  /* One card style for the whole app */
+  .surface {
+    @apply rounded-2xl border border-slate-200 bg-surface shadow-card;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
