@@ -16,6 +16,7 @@ import {
 import { ApiError, api, type ScoreLevel, type ScoreLevelReport } from '../api/client';
 import { Card } from '../components/Layout';
 import { useSettings } from '../settings';
+import { useElementWidth } from '../useElementWidth';
 import {
   categoryLabel,
   LEVEL_META,
@@ -149,14 +150,10 @@ export function Reports() {
       ? { grid: '#1e293b', axis: '#334155', tick: '#e2e8f0', tickMuted: '#94a3b8', cursor: '#1e293b', sliceStroke: '#0f172a' }
       : { grid: '#e2e8f0', axis: '#cbd5e1', tick: '#334155', tickMuted: '#64748b', cursor: '#f1f5f9', sliceStroke: '#ffffff' };
 
-  // Phones: tilt the 9 subject labels so all bars fit without sideways scrolling.
-  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 640px)').matches);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)');
-    const onChange = () => setNarrow(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  // Tilt the 9 subject labels when the chart itself is too narrow for them side by side (phones, and tablets where the
+  // sidebar or the padding leaves ~650 px). Measured on the chart, not the screen, so it holds for any layout.
+  const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
+  const narrow = chartWidth > 0 && chartWidth < 720;
 
   const [report, setReport] = useState<ScoreLevelReport | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -287,7 +284,7 @@ export function Reports() {
     <>
       {/* KPI Summary Strip */}
       {summary && !loading && !error && (
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-3.5 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-3.5 xl:grid-cols-4">
           <div className="surface p-4">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-slate-500">{t("Tổng số bài thi")}</p>
@@ -398,7 +395,7 @@ export function Reports() {
             <ScoreLegend />
 
             <div className="overflow-x-auto pb-2">
-              <div className="h-96 min-w-0">
+              <div ref={chartRef} className="h-96 min-w-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 12, right: narrow ? 4 : 16, left: 0, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chart.grid} />
@@ -475,8 +472,8 @@ export function Reports() {
             </div>
 
             {/* Spotlight Donut + 4-Level Breakdown */}
-            <div className="grid grid-cols-1 items-center gap-6 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 lg:grid-cols-12">
-              <div className="relative h-72 lg:col-span-5">
+            <div className="grid grid-cols-1 items-center gap-6 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 xl:grid-cols-12">
+              <div className="relative h-72 xl:col-span-5">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -510,7 +507,7 @@ export function Reports() {
                 </div>
               </div>
 
-              <div className="space-y-3 lg:col-span-7">
+              <div className="space-y-3 xl:col-span-7">
                 <div className="flex items-baseline justify-between border-b border-slate-200/80 pb-2.5">
                   <div>
                     <h3 className="text-base font-bold text-slate-900">{activePieTarget.title}</h3>
@@ -566,7 +563,7 @@ export function Reports() {
                 <span className="text-xs text-slate-500">{t("Chọn một môn để xem chi tiết")}</span>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {chartData.map((row) => {
                   const selected = activePieTarget.code === row.code;
                   const miniSlices = buildPieSlices(
@@ -646,8 +643,8 @@ export function Reports() {
           title={t("Bảng số liệu chi tiết")}
           subtitle={t("Số bài thi và tỷ lệ ở từng mức điểm của mỗi môn.")}
         >
-          {/* Below lg: one card per subject instead of a clipped 7-column table */}
-          <ul className="grid gap-3 sm:grid-cols-2 lg:hidden">
+          {/* Below xl: one card per subject instead of a clipped 7-column table */}
+          <ul className="grid gap-3 sm:grid-cols-2 xl:hidden">
             {chartData.map((row) => (
               <li key={row.code} className="rounded-xl border border-slate-200 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -682,7 +679,7 @@ export function Reports() {
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto lg:block">
+          <div className="hidden overflow-x-auto xl:block">
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-semibold tracking-wider text-slate-500 uppercase">

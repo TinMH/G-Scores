@@ -125,7 +125,7 @@ export function RankingSection() {
   return (
     <>
       {/* Filter Toolbar */}
-      <div className="mb-6 flex flex-col gap-3 surface p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-6 flex flex-col gap-3 surface p-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("Chọn khối xét tuyển")}>
           {groups.map((g) => {
             const active = g.code === groupCode;
@@ -151,9 +151,9 @@ export function RankingSection() {
           })}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-slate-100 pt-2.5 sm:border-t-0 sm:pt-0">
-          <span className="text-xs font-medium text-slate-500">{t("Tổ hợp:")}</span>
-          <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+        <div className="flex items-center gap-2 border-t border-slate-100 pt-2.5 xl:border-t-0 xl:pt-0">
+          <span className="shrink-0 text-xs font-medium text-slate-500">{t("Tổ hợp:")}</span>
+          <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium whitespace-nowrap text-slate-700">
             {activeGroupMeta.subjects.map(subjectName).join(' + ')}
           </span>
           <select
@@ -219,8 +219,8 @@ export function RankingSection() {
 
         {!loading && !error && ranking && (
           <>
-          {/* Below lg: one card per student instead of a clipped table */}
-          <ol className="space-y-2.5 lg:hidden">
+          {/* Below xl: one card per student (two columns on tablets) instead of a clipped table */}
+          <ol className="grid gap-2.5 md:grid-cols-2 xl:hidden">
             {pageStudents.map((student) => (
               <li key={student.sbd}>
                 <Link
@@ -250,7 +250,7 @@ export function RankingSection() {
             ))}
           </ol>
 
-          <div className="hidden overflow-x-auto lg:block">
+          <div className="hidden overflow-x-auto xl:block">
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200/90 text-xs font-semibold tracking-wider text-slate-500 uppercase">
