@@ -18,30 +18,40 @@ Built for the [Golden Owl](https://goldenowl.asia) web developer intern assignme
 - Responsive from 375 px phones through tablets to desktop (the sidebar becomes a drawer below 1024 px), keyboard accessible, respects reduced motion
 - Fast: every endpoint answers in **under 10 ms at the 95th percentile** on 1M+ rows (see [API](#api))
 
+## Screenshots
+
+The app adapts to the screen: a permanent sidebar from 1024 px (desktop and landscape tablets), a menu drawer below that
+(portrait tablets and phones), and cards instead of tables below 1280 px.
+
+### Desktop (1440 px)
+
 <table>
   <tr>
-    <td><img src="screenshots/app-search.png" alt="Score lookup"></td>
-    <td><img src="screenshots/app-reports.png" alt="Reports"></td>
+    <td><img src="screenshots/app-search.png" alt="Desktop: score lookup"></td>
+    <td><img src="screenshots/app-reports.png" alt="Desktop: reports"></td>
   </tr>
   <tr>
-    <td><img src="screenshots/app-dashboard-dark-en.png" alt="Dark mode, English"></td>
-    <td><img src="screenshots/app-settings.png" alt="Settings"></td>
+    <td><img src="screenshots/app-dashboard-dark-en.png" alt="Desktop: dark mode, English"></td>
+    <td><img src="screenshots/app-settings.png" alt="Desktop: settings"></td>
   </tr>
 </table>
+
+### Tablet (820 px, portrait)
+
 <p align="center">
-  <img src="screenshots/app-mobile-dashboard.png" alt="Mobile dashboard" width="260">
-  &nbsp;&nbsp;
-  <img src="screenshots/app-mobile-search.png" alt="Mobile score lookup" width="260">
+  <img src="screenshots/app-tablet-dashboard.png" alt="Tablet: dashboard" width="270">
+  &nbsp;
+  <img src="screenshots/app-tablet-search.png" alt="Tablet: score lookup" width="270">
+  &nbsp;
+  <img src="screenshots/app-tablet-menu.png" alt="Tablet: menu drawer" width="270">
 </p>
 
-Tablet (820 px wide, portrait):
+### Mobile (390 px)
 
 <p align="center">
-  <img src="screenshots/app-tablet-dashboard.png" alt="Tablet dashboard" width="270">
-  &nbsp;
-  <img src="screenshots/app-tablet-search.png" alt="Tablet score lookup" width="270">
-  &nbsp;
-  <img src="screenshots/app-tablet-menu.png" alt="Tablet menu drawer" width="270">
+  <img src="screenshots/app-mobile-dashboard.png" alt="Mobile: dashboard" width="260">
+  &nbsp;&nbsp;
+  <img src="screenshots/app-mobile-search.png" alt="Mobile: score lookup" width="260">
 </p>
 
 ## Quick start (Docker)
