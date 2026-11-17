@@ -1,21 +1,178 @@
+# CI/CD in four tiers. Each tier only starts when the previous gate is green.
+#
+#   [1 Lint + validate]  ->  [2 API integration E2E]  ->  [3 Compose smoke + UI E2E]  ->  [4 Publish + live check]
+#
+# The pipeline is complete but adapts to the repository: the `detect` job looks at which parts exist
+# (backend tests, frontend, k8s manifests, Dockerfiles, compose file, Playwright config, ...) and every
+# job whose inputs are missing is SKIPPED instead of failing. Add the missing piece and the job switches on.
+#
+# Optional configuration (Settings -> Secrets and variables -> Actions):
+#   vars.IMAGE_PLATFORMS  e.g. "linux/amd64,linux/arm64" (default linux/amd64)
+#   vars.DEPLOY_ENABLED   "true" to deploy to Kubernetes after publishing   (needs secrets.KUBE_CONFIG = base64 kubeconfig)
+#   vars.LIVE_URL         e.g. "https://gscores.example.com" -> post-deploy live check
+#   Playwright UI tests:  put playwright.config.ts in frontend/ (or e2e/, or repo root); it must honour BASE_URL.
+#
+# API tests, at three levels:
+#   tier 2  Jest e2e against a throw-away Postgres with a small fixture (exact logic)
+#   tier 3  scripts/smoke-check.sh + the newman suite in testing/ against the compose stack (real 1M-row dataset)
+#   tier 4  the same smoke check + newman against the live URL after deploy
+# The newman steps switch on when testing/package.json exists and upload a JUnit report as an artifact.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 jobs:
-  backend:
-    name: Backend (build, unit, e2e)
+  # ---------------------------------------------------------------------------
+  # What exists in this checkout? Drives every skip below.
+  # ---------------------------------------------------------------------------
+  detect:
+    name: Detect project parts
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
+    outputs:
+      backend: ${{ steps.d.outputs.backend }}
+      backend_e2e: ${{ steps.d.outputs.backend_e2e }}
+      frontend: ${{ steps.d.outputs.frontend }}
+      k8s: ${{ steps.d.outputs.k8s }}
+      docker: ${{ steps.d.outputs.docker }}
+      stack: ${{ steps.d.outputs.stack }}
+      newman: ${{ steps.d.outputs.newman }}
+      playwright_dir: ${{ steps.d.outputs.playwright_dir }}
+      images: ${{ steps.d.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        shell: bash
+        run: |
+          flag() { [ -e "$2" ] && echo "$1=true" || echo "$1=false"; }
+          {
+            flag backend      backend/package.json
+            flag backend_e2e  backend/test/jest-e2e.json
+            flag frontend     frontend/package.json
+            flag k8s          k8s/kustomization.yaml
+            flag newman       testing/package.json
+
+            docker=false
+            { [ -f backend/Dockerfile ] || [ -f frontend/Dockerfile ] || [ -f docker-compose.yml ]; } && docker=true
+            echo "docker=$docker"
+
+            # The compose stack needs every piece it builds.
+            stack=false
+            [ -f docker-compose.yml ] && [ -f backend/Dockerfile ] && [ -f frontend/Dockerfile ] && stack=true
+            echo "stack=$stack"
+
+            pw=""
+            for d in frontend e2e .; do
+              if ls "$d"/playwright.config.* >/dev/null 2>&1; then pw="$d"; break; fi
+            done
+            echo "playwright_dir=$pw"
+
+            imgs=()
+            [ -f backend/Dockerfile ]  && imgs+=('{"name":"gscores-api","context":".","file":"backend/Dockerfile","target":"runtime"}')
+            [ -f backend/Dockerfile ]  && imgs+=('{"name":"gscores-seeder","context":".","file":"backend/Dockerfile","target":"seeder"}')
+            [ -f frontend/Dockerfile ] && imgs+=('{"name":"gscores-web","context":"frontend","file":"frontend/Dockerfile","target":""}')
+            echo "images=[$(IFS=,; echo "${imgs[*]:-}")]"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  # ===========================================================================
+  # TIER 1 - Lint + validate (fast, no services)
+  # ===========================================================================
+  lint-backend:
+    name: "T1 · Lint backend"
+    needs: detect
+    if: needs.detect.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      - name: Type-check
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: ESLint (when a lint script exists)
+        run: npm run lint --if-present
+
+  lint-frontend:
+    name: "T1 · Lint frontend"
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - name: Type-check
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: ESLint (when a lint script exists)
+        run: npm run lint --if-present
+
+  validate-k8s:
+    name: "T1 · Validate Kubernetes manifests"
+    needs: detect
+    if: needs.detect.outputs.k8s == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Render kustomization and validate against the Kubernetes schema
+        run: |
+          kubectl kustomize k8s > rendered.yaml
+          kubeconform -strict -summary -kubernetes-version 1.30.0 -ignore-missing-schemas rendered.yaml
+
+  validate-docker:
+    name: "T1 · Validate Dockerfiles and compose"
+    needs: detect
+    if: needs.detect.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hadolint
+        run: |
+          for f in backend/Dockerfile frontend/Dockerfile; do
+            [ -f "$f" ] || continue
+            echo "== $f"
+            docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < "$f"
+          done
+      - name: docker compose config
+        run: '[ ! -f docker-compose.yml ] || docker compose config -q'
+
+  tier1:
+    name: "Gate 1 · Lint + validate"
+    needs: [lint-backend, lint-frontend, validate-k8s, validate-docker]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo "::error::A tier 1 job failed"; exit 1
+          fi
+          echo "Tier 1 passed (skipped jobs = parts not present yet)"
+
+  # ===========================================================================
+  # TIER 2 - API integration E2E against a real Postgres
+  # ===========================================================================
+  api-e2e:
+    name: "T2 · API integration E2E (Postgres)"
+    needs: [detect, tier1]
+    if: needs.tier1.result == 'success' && needs.detect.outputs.backend_e2e == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
     services:
       postgres:
         image: postgres:16-alpine
@@ -23,8 +180,7 @@ jobs:
           POSTGRES_USER: gscores
           POSTGRES_PASSWORD: gscores
           POSTGRES_DB: gscores
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U gscores"
           --health-interval 5s
@@ -39,13 +195,229 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
       - run: npm ci
       - run: npm run build
       - name: Unit tests
         run: npm test
       - name: API e2e tests
         run: npm run test:e2e
+
+  tier2:
+    name: "Gate 2 · API integration"
+    needs: [tier1, api-e2e]
+    if: always() && needs.tier1.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo "::error::A tier 2 job failed"; exit 1
+          fi
+          echo "Tier 2 passed"
+
+  # ===========================================================================
+  # TIER 3 - Full docker compose stack: HTTP smoke + Playwright UI E2E
+  # ===========================================================================
+  compose-e2e:
+    name: "T3 · Compose smoke + newman API tests + Playwright UI E2E"
+    needs: [detect, tier2]
+    if: needs.tier2.result == 'success' && needs.detect.outputs.stack == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack (postgres -> migrate+seed 1M rows -> api -> web)
+        run: docker compose up -d --build
+      - name: Smoke check through nginx (waits for the seed to finish)
+        run: WAIT_SECONDS=300 bash scripts/smoke-check.sh http://localhost:8080
+
+      - name: Set up Node for newman (skipped when testing/ does not exist)
+        if: needs.detect.outputs.newman == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: testing/package-lock.json
+      - name: API contract tests with newman (real dataset, through nginx)
+        if: needs.detect.outputs.newman == 'true'
+        working-directory: testing
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:ci -- --env-var baseUrl=http://localhost:8080/api
+      - name: Upload newman report
+        if: always() && needs.detect.outputs.newman == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-junit-compose
+          path: testing/reports
+          if-no-files-found: ignore
+
+      - name: Playwright UI E2E (skipped until a playwright.config.* exists)
+        if: needs.detect.outputs.playwright_dir != ''
+        working-directory: ${{ needs.detect.outputs.playwright_dir }}
+        env:
+          BASE_URL: http://localhost:8080
+          CI: "true"
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: Upload Playwright report
+        if: always() && needs.detect.outputs.playwright_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            ${{ needs.detect.outputs.playwright_dir }}/playwright-report
+            ${{ needs.detect.outputs.playwright_dir }}/test-results
+          if-no-files-found: ignore
+
+      - name: Dump compose logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  tier3:
+    name: "Gate 3 · Compose + UI"
+    needs: [tier2, compose-e2e]
+    if: always() && needs.tier2.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo "::error::A tier 3 job failed"; exit 1
+          fi
+          echo "Tier 3 passed"
+
+  # ===========================================================================
+  # TIER 4 - Publish images to GHCR (main only), optional deploy, post-deploy live check
+  # ===========================================================================
+  publish-images:
+    name: "T4 · Push ${{ matrix.name }} to GHCR"
+    needs: [detect, tier3]
+    if: >-
+      needs.tier3.result == 'success' &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      needs.detect.outputs.images != '[]'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lowercase owner (GHCR requires lowercase repository names)
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        if: contains(vars.IMAGE_PLATFORMS, 'arm64')
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: ${{ vars.IMAGE_PLATFORMS || 'linux/amd64' }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.name }}:latest
+            ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.name }}:${{ github.sha }}
+
+  deploy:
+    name: "T4 · Deploy to Kubernetes (opt-in)"
+    needs: [detect, publish-images]
+    if: needs.publish-images.result == 'success' && needs.detect.outputs.k8s == 'true' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency: { group: deploy-production, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lowercase owner
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - name: Configure kubectl
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          [ -n "$KUBE_CONFIG" ] || { echo "::error::secrets.KUBE_CONFIG (base64 kubeconfig) is not set"; exit 1; }
+          mkdir -p ~/.kube
+          echo "$KUBE_CONFIG" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - name: Pin images to this commit
+        working-directory: k8s
+        run: |
+          command -v kustomize >/dev/null || {
+            curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+              | sudo tar -xz -C /usr/local/bin kustomize
+          }
+          for n in api seeder web; do
+            kustomize edit set image "gscores-$n=ghcr.io/${{ steps.owner.outputs.name }}/gscores-$n:${{ github.sha }}"
+          done
+      - name: Apply and wait for rollout
+        run: |
+          # Jobs are immutable: delete the previous one so the new image's migrate+seed runs (idempotent).
+          kubectl -n gscores delete job db-migrate-seed --ignore-not-found
+          kubectl apply -k k8s
+          kubectl -n gscores wait --for=condition=complete job/db-migrate-seed --timeout=900s
+          kubectl -n gscores rollout status deployment/api --timeout=300s
+          kubectl -n gscores rollout status deployment/web --timeout=300s
+
+  live-check:
+    name: "T4 · Post-deploy live check"
+    needs: [detect, publish-images, deploy]
+    if: >-
+      !cancelled() && needs.publish-images.result == 'success' &&
+      !contains(needs.*.result, 'failure') && vars.LIVE_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke check ${{ vars.LIVE_URL }}
+        env:
+          WAIT_SECONDS: ${{ needs.deploy.result == 'success' && '600' || '60' }}
+        run: bash scripts/smoke-check.sh "${{ vars.LIVE_URL }}"
+
+      - name: Set up Node for newman (skipped when testing/ does not exist)
+        if: needs.detect.outputs.newman == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: testing/package-lock.json
+      - name: API contract tests with newman against the live URL
+        if: needs.detect.outputs.newman == 'true'
+        working-directory: testing
+        env:
+          LIVE_URL: ${{ vars.LIVE_URL }}
+        run: |
+          npm ci --no-audit --no-fund
+          # Over the internet and behind Cloudflare: allow a more generous per-request time budget.
+          npm run test:ci -- --env-var baseUrl="${LIVE_URL%/}/api" --env-var maxResponseMs=4000
+      - name: Upload newman report
+        if: always() && needs.detect.outputs.newman == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-junit-live
+          path: testing/reports
+          if-no-files-found: ignore
+
+  # Single required status check for branch protection: green when every tier that ran succeeded.
+  ci-success:
+    name: "CI passed"
+    needs: [tier1, tier2, tier3, publish-images, deploy, live-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo "::error::CI failed"; exit 1
+          fi
+          echo "All tiers that ran have passed."
