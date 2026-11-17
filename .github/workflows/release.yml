@@ -1,0 +1,266 @@
+# Release: push a tag like v1.2.3 and the live site is updated.
+#
+#   git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3      (or draft a release with a new tag on GitHub)
+#
+#   prepare -> cluster-check -> publish (images :v1.2.3) -> deploy (+ smoke + newman, auto-rollback) -> GitHub Release
+#
+# Safety rails
+#   - only stable tags (vMAJOR.MINOR.PATCH) trigger it, and the tagged commit must be on main
+#   - the cluster is reached with a ServiceAccount that can only touch the "gscores" namespace (k8s/rbac/deployer.yaml);
+#     its credentials are secrets of the "production" environment (scripts/setup-release-access.sh creates them)
+#   - the cluster is checked BEFORE anything is published, so a missing secret fails fast
+#   - after the rollout the live site is verified; on failure the deployments are rolled back
+#
+# Manual runs (Actions -> Release -> Run workflow):
+#   check_only = true             only verify that the pipeline can reach the cluster, deploy nothing
+#   version = v1.2.2              redeploy (e.g. roll back to) an existing tag; its images must already exist
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing tag to (re)deploy, e.g. v1.2.3 (ignored when check_only is set)"
+        required: false
+      check_only:
+        description: "Only check cluster access; deploy nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false # never interrupt a rollout half way
+
+permissions:
+  contents: read
+
+env:
+  SITE_URL: ${{ vars.SITE_URL || 'https://gscores.appforsell.com' }}
+  NAMESPACE: gscores
+
+jobs:
+  prepare:
+    name: Validate the release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      check_only: ${{ steps.v.outputs.check_only }}
+      is_tag_push: ${{ steps.v.outputs.is_tag_push }}
+      owner: ${{ steps.v.outputs.owner }}
+    steps:
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHECK: ${{ inputs.check_only }}
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "push" ]; then
+            version="$REF_NAME"; check_only=false; is_tag_push=true
+          else
+            version="$INPUT_VERSION"; check_only="${INPUT_CHECK:-false}"; is_tag_push=false
+          fi
+          if [ "$check_only" != "true" ] && ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$version' is not a release tag like v1.2.3"; exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "check_only=$check_only"
+            echo "is_tag_push=$is_tag_push"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.v.outputs.check_only != 'true'
+        with:
+          ref: ${{ steps.v.outputs.version }}
+          fetch-depth: 0
+      - name: The tagged commit must be on main
+        if: steps.v.outputs.check_only != 'true'
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::${{ steps.v.outputs.version }} is not on main. Releases are cut from main only."; exit 1
+          fi
+          echo "OK: $(git rev-parse --short HEAD) is on main"
+
+  cluster-check:
+    name: Check access to the cluster
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure kubectl
+        env:
+          KUBE_SERVER: ${{ secrets.KUBE_SERVER }}
+          KUBE_CA_DATA: ${{ secrets.KUBE_CA_DATA }}
+          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
+        run: |
+          for v in KUBE_SERVER KUBE_CA_DATA KUBE_TOKEN; do
+            [ -n "${!v}" ] || { echo "::error::secret $v is missing in the 'production' environment. Run scripts/setup-release-access.sh"; exit 1; }
+          done
+          echo "$KUBE_CA_DATA" | base64 -d > "$RUNNER_TEMP/ca.crt"
+          kubectl config set-cluster gscores --server="$KUBE_SERVER" --certificate-authority="$RUNNER_TEMP/ca.crt" --embed-certs=true
+          kubectl config set-credentials deployer --token="$KUBE_TOKEN"
+          kubectl config set-context gscores --cluster=gscores --user=deployer --namespace="$NAMESPACE"
+          kubectl config use-context gscores
+      - name: The pipeline can deploy, and nothing else
+        run: |
+          kubectl -n "$NAMESPACE" get deployments,statefulsets
+          can() { [ "$(kubectl auth can-i "$@" -n "$NAMESPACE")" = yes ]; }
+          can patch deployments.apps || { echo "::error::deployer cannot patch deployments"; exit 1; }
+          can delete jobs.batch || { echo "::error::deployer cannot delete jobs"; exit 1; }
+          can patch gateways.networking.istio.io || { echo "::error::deployer cannot patch gateways"; exit 1; }
+          # least privilege: it must NOT be able to read secrets or touch other namespaces
+          [ "$(kubectl auth can-i get secrets -n "$NAMESPACE")" = no ] || { echo "::error::deployer can read secrets, tighten k8s/rbac/deployer.yaml"; exit 1; }
+          [ "$(kubectl auth can-i get pods -n kube-system)" = no ] || { echo "::error::deployer can read kube-system"; exit 1; }
+          echo "Cluster access OK"
+
+  publish:
+    name: "Publish ${{ matrix.name }}:${{ needs.prepare.outputs.version }}"
+    needs: [prepare, cluster-check]
+    if: needs.prepare.outputs.check_only != 'true' && needs.prepare.outputs.is_tag_push == 'true'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: gscores-api, context: ., file: backend/Dockerfile, target: runtime }
+          - { name: gscores-seeder, context: ., file: backend/Dockerfile, target: seeder }
+          - { name: gscores-web, context: frontend, file: frontend/Dockerfile, target: "" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64 # the cluster node is amd64
+          push: true
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ghcr.io/${{ needs.prepare.outputs.owner }}/${{ matrix.name }}:${{ needs.prepare.outputs.version }}
+
+  deploy:
+    name: Deploy ${{ needs.prepare.outputs.version }} and verify the live site
+    needs: [prepare, publish]
+    # For a manual redeploy the images already exist, so `publish` is skipped; a skipped publish is fine, a failed one is not.
+    if: >-
+      !cancelled() && needs.prepare.outputs.check_only != 'true' &&
+      needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+      - name: Configure kubectl
+        env:
+          KUBE_SERVER: ${{ secrets.KUBE_SERVER }}
+          KUBE_CA_DATA: ${{ secrets.KUBE_CA_DATA }}
+          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
+        run: |
+          echo "$KUBE_CA_DATA" | base64 -d > "$RUNNER_TEMP/ca.crt"
+          kubectl config set-cluster gscores --server="$KUBE_SERVER" --certificate-authority="$RUNNER_TEMP/ca.crt" --embed-certs=true
+          kubectl config set-credentials deployer --token="$KUBE_TOKEN"
+          kubectl config set-context gscores --cluster=gscores --user=deployer --namespace="$NAMESPACE"
+          kubectl config use-context gscores
+      - name: Pin the images of this release
+        working-directory: k8s
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+        run: |
+          command -v kustomize >/dev/null || {
+            curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+              | sudo tar -xz -C /usr/local/bin kustomize
+          }
+          for n in api seeder web; do
+            kustomize edit set image "gscores-$n=ghcr.io/$OWNER/gscores-$n:$VERSION"
+          done
+          kubectl kustomize . > "$RUNNER_TEMP/rendered.yaml"
+          grep -E "image: ghcr.io" "$RUNNER_TEMP/rendered.yaml" | sort -u
+      - name: Remember what is running now (for rollback)
+        run: |
+          kubectl -n "$NAMESPACE" get deployment api web -o jsonpath='{range .items[*]}{.metadata.name}{" -> "}{.spec.template.spec.containers[0].image}{"\n"}{end}' | tee "$RUNNER_TEMP/previous.txt"
+      - name: Migrate the database first
+        run: |
+          # Jobs are immutable: replace the previous run. The seeder image is idempotent: it applies pending migrations
+          # and only (re)builds the stats, it never reloads the data.
+          command -v yq >/dev/null || {
+            sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          }
+          kubectl -n "$NAMESPACE" delete job db-migrate-seed --ignore-not-found --wait=true
+          yq eval-all 'select(.kind == "Job")' "$RUNNER_TEMP/rendered.yaml" | kubectl apply -f -
+          kubectl -n "$NAMESPACE" wait --for=condition=complete job/db-migrate-seed --timeout=900s \
+            || { kubectl -n "$NAMESPACE" logs job/db-migrate-seed --all-containers --tail=80 || true; exit 1; }
+      - name: Roll out the new version
+        run: |
+          kubectl apply -f "$RUNNER_TEMP/rendered.yaml"
+          kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=300s
+          kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=300s
+      - name: Smoke check ${{ env.SITE_URL }}
+        run: WAIT_SECONDS=120 bash scripts/smoke-check.sh "$SITE_URL"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: testing/package-lock.json
+      - name: API contract tests (newman) against the live site
+        working-directory: testing
+        run: |
+          npm ci --no-audit --no-fund
+          # Over the internet and behind Cloudflare: a generous per-request time budget.
+          npm run test:ci -- --env-var baseUrl="${SITE_URL%/}/api" --env-var maxResponseMs=4000
+      - name: Roll back to the previous version
+        if: failure()
+        run: |
+          echo "::error::Release verification failed, rolling back api and web"
+          cat "$RUNNER_TEMP/previous.txt" || true
+          kubectl -n "$NAMESPACE" rollout undo deployment/api || true
+          kubectl -n "$NAMESPACE" rollout undo deployment/web || true
+          kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=180s || true
+          kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=180s || true
+          kubectl -n "$NAMESPACE" get pods
+      - name: Upload newman report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-junit-release
+          path: testing/reports
+          if-no-files-found: ignore
+
+  release:
+    name: Create the GitHub Release
+    needs: [prepare, deploy]
+    if: needs.prepare.outputs.is_tag_push == 'true' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+      - name: Publish release notes (skipped if the release already exists)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, leaving it as is"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
