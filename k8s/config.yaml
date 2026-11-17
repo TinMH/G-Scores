@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gscores-config
+data:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: gscores
+  DB_USER: gscores
+---
+# Demo only. For real use, create it out-of-band instead of committing:
+#   kubectl -n gscores create secret generic gscores-db --from-literal=DB_PASSWORD=...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gscores-db
+type: Opaque
+stringData:
+  DB_PASSWORD: change-me

@@ -1,0 +1,27 @@
+# Runs migrations + seed once. Seeder is idempotent (skips if data exists).
+# Re-run:  kubectl -n gscores delete job db-migrate-seed && kubectl apply -k k8s/
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate-seed
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h $DB_HOST -p $DB_PORT; do sleep 2; done"]
+          envFrom:
+            - configMapRef: { name: gscores-config }
+      containers:
+        - name: seed
+          image: gscores-seeder
+          envFrom:
+            - configMapRef: { name: gscores-config }
+            - secretRef: { name: gscores-db }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }

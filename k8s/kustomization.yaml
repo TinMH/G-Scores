@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: gscores
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - seed-job.yaml
+  - api.yaml
+  - web.yaml
+  - ingress.yaml
+# Replace OWNER with your GitHub username (images pushed to GHCR by CI).
+images:
+  - name: gscores-api
+    newName: ghcr.io/OWNER/gscores-api
+    newTag: latest
+  - name: gscores-seeder
+    newName: ghcr.io/OWNER/gscores-seeder
+    newTag: latest
+  - name: gscores-web
+    newName: ghcr.io/OWNER/gscores-web
+    newTag: latest
