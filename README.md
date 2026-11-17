@@ -15,7 +15,7 @@ Built for the [Golden Owl](https://goldenowl.asia) web developer intern assignme
 - **Score lookup** by 8-digit registration number: all 9 subjects coloured by level, plus the totals of every admission group the candidate qualifies for
 - **Reports**: how many candidates fall in each of the **4 score levels** (≥ 8, 6–8, 4–6, < 4) for every subject, as a stacked bar chart, a pie chart per subject, and a data table
 - **Settings**: Vietnamese / English, light / dark / system theme, text size, and the Dashboard defaults, all persisted in the browser
-- Responsive from 375 px phones to desktop, keyboard accessible, respects reduced motion
+- Responsive from 375 px phones through tablets to desktop (the sidebar becomes a drawer below 1024 px), keyboard accessible, respects reduced motion
 - Fast: every endpoint answers in **under 10 ms at the 95th percentile** on 1M+ rows (see [API](#api))
 
 <table>
@@ -32,6 +32,16 @@ Built for the [Golden Owl](https://goldenowl.asia) web developer intern assignme
   <img src="screenshots/app-mobile-dashboard.png" alt="Mobile dashboard" width="260">
   &nbsp;&nbsp;
   <img src="screenshots/app-mobile-search.png" alt="Mobile score lookup" width="260">
+</p>
+
+Tablet (820 px wide, portrait):
+
+<p align="center">
+  <img src="screenshots/app-tablet-dashboard.png" alt="Tablet dashboard" width="270">
+  &nbsp;
+  <img src="screenshots/app-tablet-search.png" alt="Tablet score lookup" width="270">
+  &nbsp;
+  <img src="screenshots/app-tablet-menu.png" alt="Tablet menu drawer" width="270">
 </p>
 
 ## Quick start (Docker)
@@ -183,7 +193,7 @@ with a Let's Encrypt certificate.
 | Check scores by registration number | Score lookup page, `GET /api/students/:sbd` |
 | Report: students per level (≥ 8, 6–8, 4–6, < 4) by subject, as a chart | Reports page (bar + pie), `GET /api/reports/score-levels`; overall mix on the Dashboard |
 | Top 10 students of group A (Math, Physics, Chemistry) | Dashboard (A00 by default), `GET /api/rankings/A00` |
-| Responsive design | 375 px to desktop |
+| Responsive design | 375 px phones, tablets, desktop |
 | Docker | `docker compose up --build`, multi-stage Dockerfiles |
 | Deployed live | https://gscores.appforsell.com (Kubernetes on a VPS rather than a PaaS) |
 | React with Hooks, Rubik font | `useState` / `useEffect` / `useMemo` / custom hooks; Rubik via Google Fonts |
