@@ -1,0 +1,713 @@
+{
+  "info": {
+    "name": "G-Scores API",
+    "description": "Black-box API tests for G-Scores, run with newman (see testing/README.md).\n\nThey assert real values from the 2024 dataset (1,061,605 candidates), so run them against a fully seeded stack. Dataset-specific expectations live in the environment files, not in the requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('answers with JSON', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/application\\/json/));",
+          "const budget = Number(pm.variables.get('maxResponseMs') || 1500);",
+          "pm.test('responds within ' + budget + ' ms', () => pm.expect(pm.response.responseTime).to.be.below(budget));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health and catalog",
+      "description": "Liveness probe and the subject / group catalog.",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('reports ok (database reachable)', () => pm.expect(pm.response.json()).to.eql({ status: 'ok' }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/health",
+            "description": ""
+          }
+        },
+        {
+          "name": "GET /subjects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('lists the nine subjects in order', () => {",
+                  "  pm.expect(body.subjects.map((s) => s.code)).to.eql(['toan','ngu_van','ngoai_ngu','vat_li','hoa_hoc','sinh_hoc','lich_su','dia_li','gdcd']);",
+                  "});",
+                  "pm.test('lists the five groups', () => {",
+                  "  pm.expect(body.groups.map((g) => g.code)).to.eql(['A00','A01','B00','C00','D01']);",
+                  "});",
+                  "pm.test('group A00 is Toan + Vat li + Hoa hoc', () => {",
+                  "  pm.expect(body.groups.find((g) => g.code === 'A00').subjects).to.eql(['toan','vat_li','hoa_hoc']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/subjects",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Score lookup",
+      "description": "GET /students/:sbd — success, validation and not-found paths.",
+      "item": [
+        {
+          "name": "Known candidate: full score sheet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const by = Object.fromEntries(b.scores.map((s) => [s.subject.code, s]));",
+                  "pm.test('echoes the candidate number', () => pm.expect(b.sbd).to.eql(pm.variables.get('knownSbd')));",
+                  "pm.test('returns all nine subjects', () => pm.expect(b.scores).to.have.lengthOf(9));",
+                  "pm.test('Toan 8.4 is level excellent (>= 8)', () => pm.expect(by.toan).to.include({ score: 8.4, level: 'excellent' }));",
+                  "pm.test('Ngu van 6.75 is good, Hoa hoc 5.25 and Sinh hoc 5 are average', () => {",
+                  "  pm.expect(by.ngu_van).to.include({ score: 6.75, level: 'good' });",
+                  "  pm.expect(by.hoa_hoc).to.include({ score: 5.25, level: 'average' });",
+                  "  pm.expect(by.sinh_hoc).to.include({ score: 5, level: 'average' });",
+                  "});",
+                  "pm.test('a subject the candidate did not take has null score and level', () => {",
+                  "  pm.expect(by.lich_su).to.include({ score: null, level: null });",
+                  "});",
+                  "pm.test('foreign language is resolved from the code', () => pm.expect(b.foreignLanguage).to.eql('Tiếng Anh'));",
+                  "pm.test('group totals only for complete groups (A00, A01, B00, D01; C00 needs Lich su)', () => {",
+                  "  const totals = Object.fromEntries(b.groups.map((g) => [g.code, g.total]));",
+                  "  pm.expect(totals).to.eql({ A00: 19.65, A01: 22.4, B00: 18.65, D01: 23.15 });",
+                  "});",
+                  "pm.test('every level is one of the four known values or null', () => {",
+                  "  b.scores.forEach((s) => pm.expect([null, 'excellent', 'good', 'average', 'poor']).to.include(s.level));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/{{knownSbd}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Top scorer A00",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('A00 total is 29.6 (9.6 + 10 + 10)', () => {",
+                  "  pm.expect(b.groups.find((g) => g.code === 'A00').total).to.eql(29.6);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/{{topSbd}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Surrounding whitespace is trimmed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/%20{{knownSbd}}%20",
+            "description": ""
+          }
+        },
+        {
+          "name": "Letters in the number -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});",
+                  "",
+                  "pm.test('message explains the 8-digit rule', () => pm.expect(pm.response.json().message.join(' ')).to.include('8'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/abc",
+            "description": ""
+          }
+        },
+        {
+          "name": "Seven digits -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/0100000",
+            "description": ""
+          }
+        },
+        {
+          "name": "Nine digits -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/010000001",
+            "description": ""
+          }
+        },
+        {
+          "name": "Well-formed but unknown -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('message names the candidate number', () => pm.expect(pm.response.json().message).to.include('99999999'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/students/99999999",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "description": "GET /reports/score-levels — the four score levels per subject.",
+      "item": [
+        {
+          "name": "Score levels for all subjects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const counts = Object.fromEntries(b.subjects.map((s) => [s.code, s.counts]));",
+                  "const sum = (c) => c.excellent + c.good + c.average + c.poor;",
+                  "pm.test('four levels in order: >= 8, 6-8, 4-6, < 4', () => {",
+                  "  pm.expect(b.levels.map((l) => l.level)).to.eql(['excellent','good','average','poor']);",
+                  "});",
+                  "pm.test('nine subjects, counts are non-negative integers', () => {",
+                  "  pm.expect(b.subjects).to.have.lengthOf(9);",
+                  "  b.subjects.forEach((s) => Object.values(s.counts).forEach((n) => pm.expect(Number.isInteger(n) && n >= 0).to.be.true));",
+                  "});",
+                  "pm.test('Toan counts match the 2024 dataset', () => {",
+                  "  pm.expect(counts.toan).to.eql({ excellent: 198392, good: 505836, average: 258654, poor: 82731 });",
+                  "});",
+                  "pm.test('Toan was taken by 1,045,613 candidates', () => pm.expect(sum(counts.toan)).to.eql(1045613));",
+                  "const papers = b.subjects.reduce((acc, s) => acc + sum(s.counts), 0);",
+                  "pm.collectionVariables.set('papersFromReport', String(papers));",
+                  "pm.test('all subjects together: ' + papers + ' papers', () => pm.expect(papers).to.eql(Number(pm.variables.get('totalPapers'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/reports/score-levels",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rankings",
+      "description": "GET /rankings/:group — top N by group total.",
+      "item": [
+        {
+          "name": "Default: top 10 of A00",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('group is A00 = Toan + Vat li + Hoa hoc', () => {",
+                  "  pm.expect(b.group.code).to.eql('A00');",
+                  "  pm.expect(b.group.subjects).to.eql(['toan','vat_li','hoa_hoc']);",
+                  "});",
+                  "pm.test('exactly 10 rows with ranks 1..10', () => {",
+                  "  pm.expect(b.students).to.have.lengthOf(10);",
+                  "  pm.expect(b.students.map((s) => s.rank)).to.eql([1,2,3,4,5,6,7,8,9,10]);",
+                  "});",
+                  "pm.test('top three match the dataset', () => {",
+                  "  pm.expect(b.students.slice(0, 3).map((s) => [s.sbd, s.total])).to.eql([['26020938', 29.6], ['26009943', 29.55], ['19016615', 29.35]]);",
+                  "});",
+                  "pm.test('sorted by total, highest first', () => {",
+                  "  const t = b.students.map((s) => s.total);",
+                  "  pm.expect(t).to.eql([...t].sort((x, y) => y - x));",
+                  "});",
+                  "pm.test('each total equals the sum of its three scores', () => {",
+                  "  b.students.forEach((s) => {",
+                  "    const sum = s.scores.toan + s.scores.vat_li + s.scores.hoa_hoc;",
+                  "    pm.expect(Math.abs(sum - s.total)).to.be.below(0.001);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00",
+            "description": ""
+          }
+        },
+        {
+          "name": "limit=3 and lower-case group",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('group code is normalised to upper case', () => pm.expect(b.group.code).to.eql('A00'));",
+                  "pm.test('three rows', () => pm.expect(b.students).to.have.lengthOf(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/a00?limit=3",
+            "description": ""
+          }
+        },
+        {
+          "name": "Maximum useful page: limit=50",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('fifty rows, still sorted', () => {",
+                  "  const t = pm.response.json().students.map((s) => s.total);",
+                  "  pm.expect(t).to.have.lengthOf(50);",
+                  "  pm.expect(t).to.eql([...t].sort((x, y) => y - x));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00?limit=50",
+            "description": ""
+          }
+        },
+        {
+          "name": "Another group: C00 (Van + Su + Dia)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const top = pm.response.json().students[0];",
+                  "pm.test('top C00 candidate is 19000335 with 29.75', () => pm.expect([top.sbd, top.total]).to.eql(['19000335', 29.75]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/C00?limit=1",
+            "description": ""
+          }
+        },
+        {
+          "name": "Unknown group -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/Z99",
+            "description": ""
+          }
+        },
+        {
+          "name": "limit=0 -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00?limit=0",
+            "description": ""
+          }
+        },
+        {
+          "name": "limit=101 -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00?limit=101",
+            "description": ""
+          }
+        },
+        {
+          "name": "limit=abc -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00?limit=abc",
+            "description": ""
+          }
+        },
+        {
+          "name": "Unknown query parameter -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body has a message and statusCode 400', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.statusCode).to.eql(400);",
+                  "  pm.expect(b.message).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/rankings/A00?offset=5",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Overview",
+      "description": "GET /overview — dashboard numbers (pre-aggregated).",
+      "item": [
+        {
+          "name": "Totals, top scorers and per-subject stats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('dataset totals', () => {",
+                  "  pm.expect(b.totals).to.eql({",
+                  "    candidates: Number(pm.variables.get('totalCandidates')),",
+                  "    papers: Number(pm.variables.get('totalPapers')),",
+                  "    perfectScores: Number(pm.variables.get('totalPerfectScores')),",
+                  "  });",
+                  "});",
+                  "pm.test('papers equal the sum of all score levels from /reports (cross-endpoint consistency)', () => {",
+                  "  const fromReport = pm.collectionVariables.get('papersFromReport');",
+                  "  if (fromReport === undefined) { pm.expect.fail('run the Reports folder first'); }",
+                  "  pm.expect(String(b.totals.papers)).to.eql(fromReport);",
+                  "});",
+                  "pm.test('overall top scorer is C00 / 19000335 / 29.75', () => {",
+                  "  pm.expect(b.topScorer.group.code).to.eql('C00');",
+                  "  pm.expect([b.topScorer.sbd, b.topScorer.total]).to.eql(['19000335', 29.75]);",
+                  "});",
+                  "pm.test('one top scorer per group, each below 30', () => {",
+                  "  pm.expect(b.groupTopScorers.map((s) => [s.group.code, s.sbd, s.total])).to.eql([",
+                  "    ['A00','26020938',29.6], ['A01','02038432',29.6], ['B00','03015805',29.55], ['C00','19000335',29.75], ['D01','16000274',28.75],",
+                  "  ]);",
+                  "});",
+                  "pm.test('nine subjects with sane averages (0..10) and counts', () => {",
+                  "  pm.expect(b.subjects).to.have.lengthOf(9);",
+                  "  b.subjects.forEach((s) => {",
+                  "    pm.expect(s.average).to.be.within(0, 10);",
+                  "    pm.expect(s.taken).to.be.above(0);",
+                  "    pm.expect(s.taken).to.be.at.most(b.totals.candidates);",
+                  "  });",
+                  "});",
+                  "pm.test('Toan average 6.45, Dia li has the most perfect scores among the two', () => {",
+                  "  const by = Object.fromEntries(b.subjects.map((s) => [s.code, s]));",
+                  "  pm.expect(by.toan.average).to.eql(6.45);",
+                  "  pm.expect(by.dia_li.perfectScores).to.be.above(by.vat_li.perfectScores);",
+                  "});",
+                  "pm.test('perfect scores add up to the total', () => {",
+                  "  pm.expect(b.subjects.reduce((a, s) => a + s.perfectScores, 0)).to.eql(b.totals.perfectScores);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/overview",
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}
