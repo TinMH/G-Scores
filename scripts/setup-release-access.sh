@@ -47,9 +47,23 @@ echo "3/4  Checking the token works from outside, with the right (and only the r
 tmp_ca="$(mktemp)"; trap 'rm -f "$tmp_ca"' EXIT
 printf '%s' "$ca_data" | base64 -d > "$tmp_ca"
 kc() { kubectl --server="$server" --certificate-authority="$tmp_ca" --token="$(kubectl -n "$NS" get secret github-deployer-token -o jsonpath='{.data.token}' | base64 -d)" "$@"; }
-[ "$(kc auth can-i patch deployments.apps -n "$NS")" = yes ] || { echo "token cannot patch deployments"; exit 1; }
-[ "$(kc auth can-i get secrets -n "$NS")" = no ] || { echo "token can read secrets: too broad"; exit 1; }
-[ "$(kc auth can-i get pods -n kube-system)" = no ] || { echo "token can read kube-system: too broad"; exit 1; }
+# `kubectl auth can-i` prints "yes", or "no" optionally followed by a reason ("no - no RBAC policy matched"),
+# so compare the first word, and show the raw answer so a surprise is visible instead of guessed at.
+answer() { kc auth can-i "$@" 2>/dev/null || true; }
+expect() { # expect <yes|no> <description> <can-i args...>
+  local want="$1" what="$2" got; shift 2
+  got="$(answer "$@")"
+  printf '     %-44s -> %s\n' "$what" "${got:-<no answer: is the API server reachable with this token?>}"
+  case "$got" in
+    "$want"*) ;;
+    *) echo "     UNEXPECTED: wanted '$want' for: $what"; exit 1 ;;
+  esac
+}
+expect yes "patch deployments in $NS"              patch deployments.apps -n "$NS"
+expect yes "delete jobs in $NS"                    delete jobs.batch -n "$NS"
+expect no  "get secrets in $NS"                    get secrets -n "$NS"
+expect no  "get pods in kube-system"               get pods -n kube-system
+expect no  "create namespaces (cluster-wide)"      create namespaces
 echo "     ok: can deploy in '$NS', cannot read secrets or touch other namespaces"
 
 echo "4/4  GitHub environment '$ENVIRONMENT' and its secrets"

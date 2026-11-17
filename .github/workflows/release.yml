@@ -108,13 +108,19 @@ jobs:
       - name: The pipeline can deploy, and nothing else
         run: |
           kubectl -n "$NAMESPACE" get deployments,statefulsets
-          can() { [ "$(kubectl auth can-i "$@" -n "$NAMESPACE")" = yes ]; }
-          can patch deployments.apps || { echo "::error::deployer cannot patch deployments"; exit 1; }
-          can delete jobs.batch || { echo "::error::deployer cannot delete jobs"; exit 1; }
-          can patch gateways.networking.istio.io || { echo "::error::deployer cannot patch gateways"; exit 1; }
+          # `kubectl auth can-i` prints "yes", or "no" optionally followed by a reason, so compare the first word.
+          check() { # check <yes|no> <description> <can-i args...>
+            local want="$1" what="$2" got; shift 2
+            got="$(kubectl auth can-i "$@" 2>/dev/null || true)"
+            echo "  $what -> ${got:-<no answer>}"
+            case "$got" in "$want"*) ;; *) echo "::error::unexpected permission, wanted '$want' for: $what"; exit 1 ;; esac
+          }
+          check yes "patch deployments"  patch deployments.apps -n "$NAMESPACE"
+          check yes "delete jobs"        delete jobs.batch -n "$NAMESPACE"
+          check yes "patch gateways"     patch gateways.networking.istio.io -n "$NAMESPACE"
           # least privilege: it must NOT be able to read secrets or touch other namespaces
-          [ "$(kubectl auth can-i get secrets -n "$NAMESPACE")" = no ] || { echo "::error::deployer can read secrets, tighten k8s/rbac/deployer.yaml"; exit 1; }
-          [ "$(kubectl auth can-i get pods -n kube-system)" = no ] || { echo "::error::deployer can read kube-system"; exit 1; }
+          check no  "get secrets"        get secrets -n "$NAMESPACE"
+          check no  "get pods in kube-system" get pods -n kube-system
           echo "Cluster access OK"
 
   publish:
