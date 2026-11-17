@@ -367,8 +367,9 @@ export function SearchScores() {
                     <div className="mt-3.5 flex items-baseline justify-between">
                       <span
                         className={`text-2xl font-extrabold tabular-nums ${
-                          taken ? 'text-slate-900' : 'text-slate-300'
+                          taken ? 'text-slate-900' : 'text-slate-400'
                         }`}
+                        aria-hidden={!taken || undefined}
                       >
                         {formatScore(score)}
                       </span>
