@@ -3,6 +3,7 @@ import { DataSourceOptions } from 'typeorm';
 import { SubjectScoreStat } from '../reports/subject-score-stat.entity';
 import { Student } from '../students/student.entity';
 import { Init1731740000000 } from '../database/migrations/1731740000000-Init';
+import { AddOverviewStats1731750000000 } from '../database/migrations/1731750000000-AddOverviewStats';
 
 export const databaseConfig: DataSourceOptions = {
   type: 'postgres',
@@ -12,6 +13,6 @@ export const databaseConfig: DataSourceOptions = {
   password: process.env.DB_PASSWORD ?? 'gscores',
   database: process.env.DB_NAME ?? 'gscores',
   entities: [Student, SubjectScoreStat],
-  migrations: [Init1731740000000],
+  migrations: [Init1731740000000, AddOverviewStats1731750000000],
   synchronize: false,
 };
