@@ -32,7 +32,7 @@ It lives in `istio-system` because that is where the gateway looks up `credentia
 ## 3. Namespace and database secret
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/namespace.yaml          # the Namespace is created once, outside kustomization.yaml
 kubectl -n gscores create secret generic gscores-db \
   --from-literal=DB_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/')"
 ```
@@ -58,12 +58,40 @@ cd testing && npm ci && npm test -- --env-var baseUrl=https://gscores.appforsell
 
 Then set the repository variable `LIVE_URL` to `https://gscores.appforsell.com` so CI runs the same checks after each deploy.
 
+## 6. Automatic releases (tag -> live site)
+
+After the first manual deploy, the site updates itself whenever you push a release tag:
+
+```bash
+git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3        # or: GitHub -> Releases -> Draft a new release (new tag)
+```
+
+`.github/workflows/release.yml` then runs: validate the tag (stable `vX.Y.Z`, commit must be on `main`) -> check cluster access ->
+build and push `ghcr.io/tinmh/gscores-{api,seeder,web}:v1.2.3` -> migrate the database (seeder Job, idempotent) -> roll out api and web ->
+smoke check + newman against `https://gscores.appforsell.com` -> create the GitHub Release with generated notes.
+If the live verification fails, `api` and `web` are rolled back automatically (database migrations are not).
+
+**One-time setup** (needs cluster-admin and a repo admin, so it is a script you run yourself):
+
+```bash
+bash scripts/setup-release-access.sh
+```
+
+It creates a ServiceAccount that can only manage this app's resources inside the `gscores` namespace (`k8s/rbac/deployer.yaml`: it cannot
+read secrets or touch other namespaces) and stores its token, the API server URL and CA as secrets of the GitHub environment `production`.
+Revoke it any time with `kubectl -n gscores delete secret github-deployer-token`.
+
+Check the wiring without deploying anything: Actions -> Release -> Run workflow -> `check_only`.
+Roll back or redeploy an older version: Actions -> Release -> Run workflow -> `version = v1.2.2` (its images already exist).
+
+The API server must be reachable from GitHub's runners, which use changing public IPs; if you restrict it by IP, this cannot work.
+
 ## Notes
 
 - **Data.** Postgres uses the default `microk8s-hostpath` StorageClass, whose reclaim policy is `Delete`: deleting the PVC or the
   namespace deletes the data. It can be rebuilt from the CSV in about 20 seconds (`kubectl -n gscores delete job db-migrate-seed`
   then `kubectl apply -k k8s`; the seeder is idempotent).
-- **Update to a new build.** Bump `newTag` in `kustomization.yaml`, `kubectl delete job -n gscores db-migrate-seed --ignore-not-found`,
+- **Update to a new build by hand.** (Normally just push a release tag, see step 6.) Bump `newTag` in `kustomization.yaml`, `kubectl delete job -n gscores db-migrate-seed --ignore-not-found`,
   then `kubectl apply -k k8s` (Jobs are immutable, so the old one has to go).
 - **Remove everything.** `kubectl delete ns gscores` and `kubectl -n istio-system delete certificate gscores-appforsell`
   (and the DNS record).
