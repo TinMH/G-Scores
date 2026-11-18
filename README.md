@@ -134,6 +134,12 @@ The hard part is 1M+ rows, so the work is moved to where it is cheap:
 - **One wide table.** `students` has one `NUMERIC(4,2)` nullable column per subject; a lookup is a primary-key read and there are no joins.
 - **Indexes shaped like the queries.** Each admission group has an expression index such as `(toan + vat_li + hoa_hoc) DESC`, so the top N
   of a group is an index scan, not a sort of a million rows.
+- **ORM where it fits, SQL where it matters.** TypeORM owns the entities (`Student`, `SubjectScoreStat`), the repositories (the score lookup and
+  the report read), the data source and the migration runner. A few statements are raw SQL through that same TypeORM data source, on purpose:
+  the **top-N ranking**, so the `ORDER BY` is exactly the indexed expression the `SubjectRegistry` generates; the **`COPY` bulk load**, which is not
+  an ORM operation and is what turns minutes of row-by-row inserts into seconds; the **stats aggregation**, one set-based pass over a million rows
+  that would be slow and awkward as entities; and the **migrations**, which create the expression indexes. No user input is concatenated into
+  any of them: the only request value, the ranking `limit`, is a bound parameter; the rest is fixed text (migrations) or generated from the registry (ranking, stats).
 - **Pre-aggregated reports.** The 4-level counts per subject and the dashboard numbers (totals, per-subject averages, top scorers) are computed
   once at seed time into two tiny tables, so the report endpoints read a few dozen rows.
 - **Object-oriented subjects (required by the brief).** `Subject` is an abstract class specialised as `CoreSubject`, `NaturalScienceSubject`,
@@ -280,7 +286,7 @@ with a Let's Encrypt certificate.
 | React with Hooks, Rubik font | `useState` / `useEffect` / `useMemo` / custom hooks; Rubik via Google Fonts |
 | **OOP for managing subjects** | `backend/src/subjects/domain/` |
 | Form validation and tight logic | DTO validation (`class-validator`), `whitelist` + `forbidNonWhitelisted`, client-side checks, translated error states |
-| ORM, TypeScript, PostgreSQL | TypeORM 0.3, TypeScript on both sides, PostgreSQL 16 |
+| ORM, TypeScript, PostgreSQL | TypeORM 0.3 (entities, repositories, migrations; raw SQL through the same data source for the ranking, `COPY` and the stats, see [How it works](#how-it-works)), TypeScript on both sides, PostgreSQL 16 |
 
 Beyond the brief: English and Vietnamese, dark mode, user settings, pagination, a pre-aggregated overview endpoint, an automated API test suite, a four-tier CI
 pipeline, and a one-command deploy with automatic rollback.
