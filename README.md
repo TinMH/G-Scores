@@ -140,13 +140,84 @@ The hard part is 1M+ rows, so the work is moved to where it is cheap:
   `SocialScienceSubject` and `ForeignLanguageSubject`; `SubjectGroup` composes subjects into admission groups and computes totals;
   `SubjectRegistry` is the single source of truth. Reports, ranking, lookup and the seeder's SQL all read from it, so nothing hard-codes a subject.
 
-| Layer | Stack |
-|---|---|
-| API | NestJS 11, TypeScript, TypeORM 0.3, `class-validator`, Swagger, throttler |
-| Database | PostgreSQL 16 (migrations, `COPY` seeder, expression indexes) |
-| Web | React 19 (hooks), Vite 6, Tailwind CSS 4, Recharts, React Router 7, Rubik font |
-| Tests | Jest (unit + e2e), newman / Postman; CI also runs kubeconform and hadolint |
-| Delivery | Docker (multi-stage), docker compose, Kubernetes (Kustomize, Istio), GitHub Actions, Cloudflare |
+### Backend flow
+
+**One request**, from the browser to the database and back (`GET /api/students/26020938`). The guard and the pipe are global, so every
+endpoint gets them; each failure answers right where it happens, as JSON `{ statusCode, message, error }`.
+
+```mermaid
+sequenceDiagram
+  participant C as Browser
+  participant N as nginx (web)
+  participant G as ThrottlerGuard
+  participant V as ValidationPipe
+  participant K as Controller
+  participant S as Service
+  participant R as SubjectRegistry
+  participant D as PostgreSQL
+
+  C->>N: GET /api/students/26020938
+  N->>G: proxy_pass api:3000 (X-Forwarded-For = client IP)
+  alt more than 60 requests per minute from this IP
+    G-->>C: 429 Too Many Requests
+  end
+  G->>V: allowed
+  alt sbd is not exactly 8 digits
+    V-->>C: 400 Bad Request (validation message)
+  end
+  V->>K: SbdParamDto { sbd } (trimmed and validated)
+  K->>S: findBySbd(sbd)
+  S->>D: SELECT * FROM students WHERE sbd = $1 (primary key)
+  D-->>S: one row, or none
+  alt no row
+    S-->>C: 404 Not Found
+  end
+  S->>R: classify each subject, total each admission group
+  R-->>S: scores with levels, group totals
+  S-->>C: 200 JSON score sheet
+```
+
+**What each endpoint reads.** Nothing scans the 1M-row table on request, except the indexed top-N query:
+
+| Endpoint | Validated by | Reads | Fails with |
+|---|---|---|---|
+| `GET /api/health` | none (not rate limited, used by the K8s probes) | `SELECT 1` | 503 when the database is down |
+| `GET /api/subjects` | none | `SubjectRegistry`, in memory (no query) | n/a |
+| `GET /api/students/:sbd` | `SbdParamDto`: `^\d{8}$` | `students` by primary key, then the registry classifies and totals | 400, 404 |
+| `GET /api/rankings/:group` | `TopQueryDto`: `limit` 1 to 100; the group must exist in the registry | `students` through the group's expression index, `ORDER BY total DESC LIMIT $1` | 400, 404 |
+| `GET /api/reports/score-levels` | none | `subject_score_stats` (about 36 rows) | n/a |
+| `GET /api/overview` | none | `overview_stats` (3 JSONB rows) | n/a |
+
+Every endpoint except `/health` can also answer 429. The SQL of the ranking query is built from the registry (column names and the total
+expression are never user input) and the limit is a bound parameter.
+
+**Getting the data in** (happens before the API serves traffic; on Kubernetes it is the `db-migrate-seed` Job, which `deploy.sh` re-runs before every rollout, and the seeder skips the load when the data is already there):
+
+```mermaid
+flowchart LR
+  M["migrate<br/>tables + indexes"] --> L["seed<br/>COPY the CSV into students"] --> A["ANALYZE students"] --> R["refreshStats()<br/>one pass, driven by SubjectRegistry"]
+  R --> T1[("subject_score_stats<br/>about 36 rows")]
+  R --> T2[("overview_stats<br/>3 rows")]
+```
+
+The seeder is idempotent: when `students` already has rows it skips the load (and only rebuilds `overview_stats` if that table is empty).
+
+## Tech stack
+
+| Area | Technology | Used for |
+|---|---|---|
+| Language, runtime | TypeScript 5, Node.js 22 | One language for API and web |
+| API | NestJS 11 (Express), TypeORM 0.3 | Modules, dependency injection, entities and migrations |
+| Validation, docs, limits | `class-validator` + `class-transformer`, `@nestjs/swagger`, `@nestjs/throttler` | DTO validation (`whitelist`, `forbidNonWhitelisted`), interactive docs at `/api/docs`, 60 requests per minute per IP |
+| Database | PostgreSQL 16 | One wide `students` table, expression indexes, two pre-aggregated tables |
+| Bulk load | `pg` + `pg-copy-streams` | `COPY` of the CSV, about 13 to 23 s for 1,061,605 rows |
+| Web | React 19 (hooks), React Router 7, Vite 6 | The SPA: dashboard, lookup, reports, settings |
+| UI | Tailwind CSS 4, Recharts 2, Rubik font | Responsive layout, dark mode by remapping the palette, bar and pie charts |
+| Web server | nginx 1.27 | Serves the build with gzip, long-lived cache for hashed assets, `no-cache` for `index.html`, security headers; proxies `/api` to the API |
+| Tests | Jest 29 + supertest, newman 6 | 9 unit and 32 e2e tests (real migrations, hand-made data); 20 requests with 103 assertions on the real dataset; latency benchmark |
+| Containers | Docker (multi-stage, one image each for api, seeder and web), docker compose | `docker compose up --build` locally, the same images in production |
+| Kubernetes | MicroK8s, Kustomize, Istio gateway, cert-manager (Let's Encrypt) | Postgres StatefulSet, migrate and seed Job, two replicas each of api and web, HTTPS |
+| CI and delivery | GitHub Actions, GHCR, kubeconform, hadolint, Cloudflare | Four-tier pipeline, images published to `ghcr.io/tinmh`, DNS and proxy for `gscores.appforsell.com` |
 
 ## Project structure
 
